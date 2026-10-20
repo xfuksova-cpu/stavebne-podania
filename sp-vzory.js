@@ -421,10 +421,22 @@ function f(id,fallback){
 }
 const $=s=>root.querySelector(s);
 const HASH='vzor-';
-const setHash=h=>{try{history.replaceState(null,'',h?'#'+HASH+h:location.pathname+location.search)}catch(e){}};
+/* Navig\u00e1cia cez hist\u00f3riu prehliada\u010da: tla\u010didlo Sp\u00e4\u0165 v prehliada\u010di vr\u00e1ti z formul\u00e1ra na ponuku vzorov */
+const setHash=(h,nav)=>{if(nav==='none')return;try{history[nav==='push'?'pushState':'replaceState']({spv:h||'home'},'',h?'#'+HASH+h:location.pathname+location.search)}catch(e){}};
+let backable=false;
+function goHome(){ if(backable&&history.state&&history.state.spv&&history.state.spv!=='home') history.back(); else renderCatalog('replace'); }
+/* Krok sp\u00e4\u0165: z\u00e1sobn\u00edk predch\u00e1dzaj\u00facich stavov formul\u00e1ra */
+let undo=[], lastSnap=0;
+function snap(){undo.push(JSON.stringify({shared,extra}));if(undo.length>50)undo.shift();updUndo()}
+function updUndo(){const b=root&&root.querySelector('#spv-undo');if(b)b.disabled=!undo.length}
+function undoStep(){
+  if(!undo.length)return;
+  const st=JSON.parse(undo.pop()); shared=st.shared; extra=st.extra; lastSnap=0;
+  save(K_SHARED,shared); save(K_EXTRA,extra); open(cur.id,'none'); toast('Posledn\u00e1 zmena bola vr\u00e1ten\u00e1');
+}
 
 /* ---------- Ponuka vzorov ---------- */
-function renderCatalog(){
+function renderCatalog(nav){
   cur=null;
   root.innerHTML=`<div class="spv-head">
      <h1>Stavebn\u00e9 podania<span>vzory pod\u013ea nov\u00e9ho stavebn\u00e9ho z\u00e1kona</span></h1>
@@ -447,8 +459,8 @@ function renderCatalog(){
   q.addEventListener('input',draw);
   q.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();draw()}});
   $('#spv-qbtn').onclick=draw;
-  $('#spv-list').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b)open(b.dataset.id)});
-  draw(); setHash('');
+  $('#spv-list').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b){backable=true;open(b.dataset.id,'push')}});
+  draw(); setHash('',nav||'push');
 }
 
 /* ---------- Editor ---------- */
@@ -460,8 +472,8 @@ function input(def){
   else el=`<input id="${id}" data-k="${def.id}" type="${def.type||'text'}" value="${v}" placeholder="${esc(def.ph||'')}">`;
   return `<label class="spv-f" for="${id}">${esc(def.l)}${el}</label>`;
 }
-function open(id){
-  cur=TPL.find(t=>t.id===id); if(!cur) return renderCatalog();
+function open(id,nav){
+  cur=TPL.find(t=>t.id===id); if(!cur) return renderCatalog('replace');
   const ex=extra[cur.id]||(extra[cur.id]={});
   if(!ex._pr) ex._pr=cur.p.map(()=>true);
   const groups=cur.g.map(g=>`<fieldset><legend>${GROUPS[g].t}${GROUPS[g].o?` <small>(${GROUPS[g].o})</small>`:''}</legend>${GROUPS[g].f.map(input).join('')}</fieldset>`);
@@ -477,36 +489,41 @@ function open(id){
      <div class="spv-tools">
        ${inFrame?'':'<button type="button" class="spv-btn spv-btn-pri" id="spv-print">Tla\u010di\u0165 / PDF</button><button type="button" class="spv-btn" id="spv-doc">Stiahnu\u0165 do Wordu</button>'}
        <button type="button" class="spv-btn${inFrame?' spv-btn-pri':''}" id="spv-copy">Kop\u00edrova\u0165</button>
+       <button type="button" class="spv-btn" id="spv-undo" title="Vr\u00e1ti posledn\u00fa zmenu vo formul\u00e1ri"${undo.length?'':' disabled'}>\u21b6 Sp\u00e4\u0165</button>
        <button type="button" class="spv-btn" id="spv-clear">Vy\u010disti\u0165 \u00fadaje</button>
      </div>
      ${groups.join('')}
+     <button type="button" class="spv-back" id="spv-back2">\u2039 Sp\u00e4\u0165 na v\u0161etky vzory</button>
    </form>
    <div class="spv-paperwrap"><div class="spv-paper" id="spv-paper"></div></div></div>
    <div class="spv-toast" id="spv-toast" hidden></div>`;
   const frm=$('#spv-frm');
   frm.addEventListener('input',onInput); frm.addEventListener('change',onInput);
   frm.addEventListener('submit',e=>e.preventDefault());
-  $('#spv-back').onclick=renderCatalog;
-  $('#spv-switch').onchange=e=>open(e.target.value);
+  $('#spv-back').onclick=goHome; $('#spv-back2').onclick=goHome;
+  $('#spv-switch').onchange=e=>{backable=true;open(e.target.value,'push')};
+  $('#spv-undo').onclick=undoStep;
   $('#spv-copy').onclick=copyDoc;
   $('#spv-clear').onclick=clearData;
   if(!inFrame){$('#spv-print').onclick=printDoc;$('#spv-doc').onclick=downloadDoc;}
-  renderPaper(); setHash(cur.id);
+  renderPaper(); setHash(cur.id,nav||'replace');
   const top=root.getBoundingClientRect().top+window.scrollY-20; if(window.scrollY>top) window.scrollTo(0,top);
 }
 function onInput(e){
   const t=e.target;
+  if(t.dataset.pr===undefined&&!t.dataset.k) return;
+  if(e.type==='change'&&t.dataset.pr===undefined&&t.tagName!=='SELECT') return; // textov\u00e9 polia u\u017e spracoval \u201einput\u201c
+  if(Date.now()-lastSnap>1500) snap(); lastSnap=Date.now();
   if(t.dataset.pr!==undefined) extra[cur.id]._pr[+t.dataset.pr]=t.checked;
-  else if(t.dataset.k){const k=t.dataset.k; if(isShared(k)) shared[k]=t.value; else extra[cur.id][k]=t.value;}
-  else return;
+  else {const k=t.dataset.k; if(isShared(k)) shared[k]=t.value; else extra[cur.id][k]=t.value;}
   save(K_SHARED,shared); save(K_EXTRA,extra); renderPaper();
 }
 let clearArmed=false;
 function clearData(){
   const b=$('#spv-clear');
   if(!clearArmed){clearArmed=true;b.textContent='Naozaj vy\u010disti\u0165?';setTimeout(()=>{clearArmed=false;if(b.isConnected)b.textContent='Vy\u010disti\u0165 \u00fadaje'},3000);return}
-  clearArmed=false; shared={datum:today()}; extra={};
-  save(K_SHARED,shared); save(K_EXTRA,extra); open(cur.id); toast('\u00dadaje vy\u010disten\u00e9');
+  clearArmed=false; snap(); shared={datum:today()}; extra={};
+  save(K_SHARED,shared); save(K_EXTRA,extra); open(cur.id,'none'); toast('\u00dadaje vy\u010disten\u00e9 \u2013 vr\u00e1tite ich tla\u010didlom \u21b6 Sp\u00e4\u0165');
 }
 
 function docHTML(){
@@ -570,7 +587,12 @@ let tt;function toast(m){const el=$('#spv-toast');if(!el)return;el.textContent=m
 function mount(el){
   root=el; root.classList.add('spv');
   const h=location.hash.slice(1);
-  if(h.indexOf(HASH)===0 && TPL.some(t=>t.id===h.slice(HASH.length))) open(h.slice(HASH.length)); else renderCatalog();
+  route('replace');
+  window.addEventListener('popstate',()=>route('none'));
+}
+function route(nav){
+  const h=location.hash.slice(1);
+  if(h.indexOf(HASH)===0 && TPL.some(t=>t.id===h.slice(HASH.length))) open(h.slice(HASH.length),nav); else renderCatalog(nav);
 }
 window.StavebnePodania={mount,version:'1.0.0'};
 function auto(){const el=document.getElementById('sp-vzory');if(el&&!el.dataset.manual)mount(el)}

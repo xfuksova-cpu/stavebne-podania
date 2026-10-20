@@ -92,3 +92,5 @@
   .spv-paper .rcp,.spv-paper .sig{margin-left:28%}
 }
 @media (prefers-reduced-motion:reduce){.spv *{transition:none!important}}
+.spv-form .spv-back{justify-self:start}
+.spv-btn:disabled{opacity:.45;cursor:default;border-color:var(--spv-line);color:inherit}
